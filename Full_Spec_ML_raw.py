@@ -26,7 +26,7 @@ import scipy.io
 #function
 #%returns AE MSE to dB representation of spectrogram
 def mse2DB(mse):
-    return (mse*5)
+    return (mse)
 
 #normalize assuming min is 0
 def thresh(data):
@@ -46,6 +46,7 @@ dir_path = "C:/Users/Alvin/Documents/MATLAB/Cam_Dat/"
 # directory for full layer files (model building)
 dir_test = "C:/Users/Alvin/Documents/MATLAB/Cam_Dat/Testing_training_autoenc/"
 
+#Old params for previous data loading
 sub_files = ["h_nom/","test/","h_test/"]
 recon_loc = "recon/" #sub directory with reconstruction data
 
@@ -96,9 +97,8 @@ img_unh = u_dat.transpose()
 img_unh = thresh(img_unh.astype('float32') / global_max)
 
 # included in samp_lays
-lay_26 = u_test[1].transpose()
+lay_26 = u_test[2].transpose()
 lay_26 = thresh(lay_26.astype('float32')/global_max)
-
 
 #%% display data sizes
 
@@ -112,7 +112,7 @@ print (img_unh.shape)
 #%%
 #Construct Autoencoder
 
-latent_dim = 2
+latent_dim = 4
 
 print("Latent Dimension:")
 print(latent_dim)
@@ -123,9 +123,11 @@ class Autoencoder(Model):
     self.latent_dim = latent_dim   
     self.encoder = tf.keras.Sequential([
       layers.Flatten(),
+      layers.Dense(10, activation='relu'),
       layers.Dense(latent_dim, activation='sigmoid'),
     ])
     self.decoder = tf.keras.Sequential([
+      layers.Dense(10, activation='relu'),
       layers.Dense(63, activation='sigmoid'),
       layers.Reshape((63, 1))
     ])
@@ -139,21 +141,26 @@ autoencoder = Autoencoder(latent_dim)
 
 autoencoder.compile(optimizer='adam', loss=losses.MeanSquaredError())
 
+autoencoder.build(input_shape=(None,63))
+
+autoencoder.encoder.summary()
+autoencoder.decoder.summary()
+
 #%%
 #Train autoencoder
 
-history = autoencoder.fit(img_train, img_train, epochs=10,batch_size = 100, shuffle=True, validation_data=(img_test, img_test))
+history = autoencoder.fit(img_train, img_train, epochs=4,batch_size = 100, shuffle=True, validation_data=(img_test, img_test))
 
 #%% Verify 
 encoded_imgs = autoencoder.encoder(img_test).numpy()
 decoded_imgs = autoencoder.decoder(encoded_imgs).numpy()
 
-l_spec = 553; #arbitrary shape for plotting
+l_spec = 554; #arbitrary shape for plotting
 l_spec_full = np.shape(decoded_imgs)[0];
 
-n = 5
+n = 2
 k = 0;
-test_fig = plt.figure(figsize=(20, 2))
+test_fig = plt.figure(figsize=(12, 4))#figsize=(20, 2)
 for i in range(n):
   # display original
   ax = plt.subplot(2, n, i + 1)
@@ -179,7 +186,7 @@ MSE_test = mse2DB(np.sqrt(MS_test))
 
 mse_test_fig = plt.figure()
 plt.plot(MSE_test)
-plt.title("Mean Squared Error, Test Data")
+plt.title("Mean Squared Error, Test Nominal Data")
 plt.xlabel('Index')
 plt.ylabel('MSE')
 plt.show()
@@ -192,10 +199,13 @@ unh_len_full = np.shape(decoded_unh)[0]
 unh_len = 553
 k = 0;
 
+unh_orig = np.reshape(img_unh[unh_len*(k):unh_len*(k+1)].transpose(),(63,unh_len))
+unh_recon = np.reshape(decoded_unh[unh_len*(k):unh_len*(k+1)].transpose(),(63,unh_len))
+
 # display original
 unh_fig = plt.figure()
 ax = plt.subplot(2, 1, 1)
-plt.imshow(np.reshape(img_unh[unh_len*(k):unh_len*(k+1)].transpose(),(63,unh_len)))
+plt.imshow(unh_orig)
 plt.title("original")
 plt.gray()
 ax.get_xaxis().set_visible(False)
@@ -203,7 +213,7 @@ ax.get_yaxis().set_visible(False)
 
 # display reconstruction
 ax = plt.subplot(2, 1, 2)
-plt.imshow(np.reshape(decoded_unh[unh_len*(k):unh_len*(k+1)].transpose(),(63,unh_len)))
+plt.imshow(unh_recon)
 plt.title("reconstructed")
 plt.gray()
 ax.get_xaxis().set_visible(False)
@@ -214,11 +224,41 @@ plt.show()
 MS_unh = np.mean(np.square(np.subtract(img_unh,np.reshape(decoded_unh,(unh_len_full,63)))),axis = 1)
 MSE_unh = mse2DB(np.sqrt(MS_unh))
 
+t_unh = np.linspace(0,5.5,unh_len)
+rmse_unh = MSE_unh[unh_len*(k):unh_len*(k+1)]
+mse_mean = np.mean(MSE_test)
+mse_sd = np.std(MSE_test)
+thresh_val = mse_mean + 2.5*mse_sd
+
 mse_unh_fig = plt.figure()
-plt.plot(MSE_unh[unh_len*(k):unh_len*(k+1)])
-plt.title("Mean Squared Error, Unhealthy Segments")
-plt.xlabel('Index')
-plt.ylabel('MSE (dB)')
+plt.plot(t_unh,rmse_unh,label='Reconstruction Error')
+plt.axhline(y=thresh_val,color='r',xmin=0,xmax=unh_len,linestyle='--',label='Threshold')
+plt.title("Mean Squared Error, Unhealthy Spectrogram")
+plt.xlabel('Time (s)')
+plt.ylabel('MSE')
+plt.legend(loc='upper left')
+plt.show()
+
+trig_unh = rmse_unh>=thresh_val
+x_lab_len = 5
+x_tick_list = np.linspace(0,5.5,x_lab_len).astype(str)
+
+trig_fig, trig_ax = plt.subplots(1,1)
+trig_ax.imshow(unh_orig,extent = [-1,1,-1,1])
+#plt.plot(t_unh)
+#plt.xlabel('Time (s)')
+#plt.ylabel('')
+trig_ax.get_yaxis().set_visible(False)
+trig_ax.set_xticks(np.linspace(-1,1,x_lab_len))
+trig_ax.set_xticklabels(x_tick_list)
+plt.title('Unhealthy Locations')
+
+t_1 = np.linspace(-1,1,unh_len)
+
+for i in range(unh_len-1):
+    if trig_unh[i]:
+        plt.axvspan(t_1[i],t_1[i+1],color='r',alpha=0.1)
+
 plt.show()
 
 #%% Full layer
@@ -254,13 +294,18 @@ lay_26_MSE_fig = plt.figure()
 plt.plot(MSE_26)
 plt.title("Mean Squared Error, Full Test Layer")
 plt.xlabel('Index')
-plt.ylabel('MSE (dB)')
+plt.ylabel('MSE')
 plt.show()
 
 mse = losses.MeanSquaredError()
 MSE_lay = mse2DB(mse(lay_26_t,decoded_26).numpy())
-print("Layer MSE (dB)")
+print("Layer MSE")
 print(MSE_lay)
+
+#%% test reconstructed layers
+recon_lay_err = np.mean(np.abs(unh_recon-decoded_26))
+print('Mean error of recon layers:')
+print(recon_lay_err)
 
 #%%  Plot Frqs
 
@@ -286,7 +331,35 @@ plt.legend(frq_legend)
 ax1.set_title('Original')
 ax2.set_title('Reconstructed')
 
+#%% generate data for test
+
+
+#%% Loss Fig
+
+loss_fig,ax = plt.subplots()
+ax.plot(history.history['loss'], label='Training Loss')
+ax.plot(history.history['val_loss'], label = 'Validation Loss')
+ax.set_xlabel('Epoch')
+ax.set_ylabel('Loss')
+# ax1.set_ylim([0.15, 1.05])
+ax.legend(loc='upper right')
+ax.set_title('Training and Validation Loss (MSE) vs Epoch')
+
+# fig2,ax2 = plt.subplots()
+# ax2.plot(history.history['loss'], label='Training Loss')
+# ax2.plot(history.history['val_loss'], label = 'Testing Loss')
+# ax2.set_xlabel('Epoch')
+# ax2.set_ylabel('Loss')
+# ax2.set_ylim([-0.1, 4.8])
+# ax2.legend(loc='upper right')
+# ax2.set_title('Training and Testing Loss vs Epoch')
+
+
 #%% Generate sample recon errors for algorithm
+
+#Comment out to save data
+import sys
+sys.exit("Did not save data")
 
 # samp_recon = []
 
@@ -357,26 +430,6 @@ scipy.io.savemat(dir_test+"recon.mat",mdict={'nom_recon':samp_recon,'h_recon':h_
 #save latent space
 scipy.io.savemat(dir_test+"LS.mat",mdict={'nom_LS':samp_LS,'h_LS':h_LS,'u_LS':u_LS})
 
-
-#%% Loss Fig
-
-loss_fig,ax = plt.subplots()
-ax.plot(history.history['loss'], label='Training Loss')
-ax.plot(history.history['val_loss'], label = 'Validation Loss')
-ax.set_xlabel('Epoch')
-ax.set_ylabel('Loss')
-# ax1.set_ylim([0.15, 1.05])
-ax.legend(loc='upper right')
-ax.set_title('Training and Validation Loss (MSE) vs Epoch')
-
-# fig2,ax2 = plt.subplots()
-# ax2.plot(history.history['loss'], label='Training Loss')
-# ax2.plot(history.history['val_loss'], label = 'Testing Loss')
-# ax2.set_xlabel('Epoch')
-# ax2.set_ylabel('Loss')
-# ax2.set_ylim([-0.1, 4.8])
-# ax2.legend(loc='upper right')
-# ax2.set_title('Training and Testing Loss vs Epoch')
 
 
 #%%
